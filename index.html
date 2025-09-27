@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Градиентный пион</title>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden; 
+            background: #000;
+        }
+        #canvas-container { 
+            width: 100vw; 
+            height: 100vh; 
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <script>
+        // Параметры пиона с заданными значениями
+        const params = {
+            petalCount: 120,
+            flowerSize: 3.6,
+            petalCurvature: 3.0,
+            layerCount: 2,
+            rows: 35,
+            bumpIntensity: 0.6,
+            bumpFrequency: 1,
+            pSharpness: 0.2,
+            layerScale: 0.7
+        };
+
+        // Цветовая палитра градиента
+        const gradientColors = [
+            0xf8618f, 0xe7cde5, 0xa197e4, 0xeed1f0, 0xb9a6dd, 0xb9a6dd
+        ];
+
+        let scene, camera, renderer, controls;
+        let flowerMesh;
+        
+        // Переменные для управления мерцанием
+        let flickerIntensity = 0;
+        let flickerSpeed = 0.15;
+        
+        function init() {
+            // Сцена
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+            
+            // Камера
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera.position.z = 10;
+            
+            // Рендерер
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            
+            // Управление камерой
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 0.5;
+            
+            // Освещение с градиентными цветами
+            const ambientLight = new THREE.AmbientLight(0xf8618f, 0.8);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xe7cde5, 1.0);
+            directionalLight.position.set(5, 8, 10);
+            scene.add(directionalLight);
+            
+            const pointLight = new THREE.PointLight(0xa197e4, 1.2, 100);
+            pointLight.position.set(0, 2, 5);
+            scene.add(pointLight);
+            
+            // Создание пиона
+            createFlower();
+            
+            // Обработка изменения размера окна
+            window.addEventListener('resize', onWindowResize);
+            
+            // Запуск анимации
+            animate();
+        }
+        
+        // Функция для получения цвета из градиента
+        function getGradientColor(layerProgress, radiusProgress) {
+            const colorIndex = Math.floor((layerProgress * 0.7 + radiusProgress * 0.3) * (gradientColors.length - 1));
+            const t = (layerProgress * 0.7 + radiusProgress * 0.3) * (gradientColors.length - 1) - colorIndex;
+            
+            const color1 = new THREE.Color(gradientColors[Math.min(colorIndex, gradientColors.length - 1)]);
+            const color2 = new THREE.Color(gradientColors[Math.min(colorIndex + 1, gradientColors.length - 1)]);
+            
+            return new THREE.Color().lerpColors(color1, color2, t);
+        }
+        
+        // Функция для получения цвета мерцания из градиента
+        function getFlickerColor() {
+            const progress = (Math.sin(flickerIntensity * 0.5) + 1) / 2; // От 0 до 1
+            const colorIndex = Math.floor(progress * (gradientColors.length - 1));
+            const t = progress * (gradientColors.length - 1) - colorIndex;
+            
+            const color1 = new THREE.Color(gradientColors[Math.min(colorIndex, gradientColors.length - 1)]);
+            const color2 = new THREE.Color(gradientColors[Math.min(colorIndex + 1, gradientColors.length - 1)]);
+            
+            return new THREE.Color().lerpColors(color1, color2, t);
+        }
+        
+        function createFlower() {
+            if (flowerMesh) {
+                scene.remove(flowerMesh);
+                if (flowerMesh.geometry) flowerMesh.geometry.dispose();
+                if (flowerMesh.material) flowerMesh.material.dispose();
+            }
+            
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const colors = [];
+            const indices = [];
+            
+            const petalCount = params.petalCount;
+            const flowerSize = params.flowerSize;
+            const petalCurvature = params.petalCurvature;
+            const layerCount = params.layerCount;
+            const rows = params.rows;
+            const bumpIntensity = params.bumpIntensity;
+            const bumpFrequency = params.bumpFrequency;
+            const pSharpness = params.pSharpness;
+            const layerScale = params.layerScale;
+            
+            const t_D = (180 * 15) / petalCount;
+            const r_D = 1 / rows;
+            
+            for (let layer = 0; layer < layerCount; layer++) {
+                const currentLayerScale = 1 - (layer / layerCount) * (1 - layerScale);
+                const layerHeight = layer * 0.2;
+                const layerProgress = layer / (layerCount - 1);
+                
+                for (let r = 0; r <= rows; r++) {
+                    const radiusProgress = r / rows;
+                    
+                    for (let theta = 0; theta <= petalCount; theta++) {
+                        const phi = (180 / 3) * Math.exp(-theta * t_D / (8 * 180));
+                        
+                        const angleFactor = (3.6 * theta * t_D) % 360;
+                        const normalizedAngle = angleFactor / 180;
+                        const baseShape = 1 - Math.pow(1 - normalizedAngle, 2);
+                        const petalCut = Math.pow(baseShape, pSharpness);
+                        
+                        const hangDown = petalCurvature * Math.pow(r * r_D, 2) * 
+                                        Math.pow(1.3 * r * r_D - 1, 2) * 
+                                        Math.sin(phi * Math.PI / 180);
+                        
+                        const scale = flowerSize * currentLayerScale;
+                        
+                        const baseX = scale * petalCut * (r * r_D * Math.sin(phi * Math.PI / 180) + 
+                                     hangDown * Math.cos(phi * Math.PI / 180)) * 
+                                     Math.sin(theta * t_D * Math.PI / 180);
+                        const baseY = -scale * petalCut * (r * r_D * Math.cos(phi * Math.PI / 180) - 
+                                     hangDown * Math.sin(phi * Math.PI / 180)) + layerHeight;
+                        const baseZ = scale * petalCut * (r * r_D * Math.sin(phi * Math.PI / 180) + 
+                                     hangDown * Math.cos(phi * Math.PI / 180)) * 
+                                     Math.cos(theta * t_D * Math.PI / 180);
+                        
+                        const bump = bumpIntensity * 
+                                   Math.sin(bumpFrequency * theta * t_D * Math.PI / 180) *
+                                   Math.sin(bumpFrequency * r * r_D * Math.PI) *
+                                   Math.max(0, r * r_D);
+                        
+                        const pX = isNaN(baseX) ? 0 : baseX + bump * 0.3;
+                        const pY = isNaN(baseY) ? 0 : baseY + bump * 0.5;
+                        const pZ = isNaN(baseZ) ? 0 : baseZ + bump * 0.3;
+                        
+                        const offset = layer * 0.1;
+                        const pX_final = pX * (1 + offset);
+                        const pZ_final = pZ * (1 + offset);
+                        
+                        if (!isNaN(pX_final) && !isNaN(pY) && !isNaN(pZ_final)) {
+                            vertices.push(pX_final, pY, pZ_final);
+                            
+                            const color = getGradientColor(layerProgress, radiusProgress);
+                            colors.push(color.r, color.g, color.b);
+                        }
+                    }
+                }
+            }
+            
+            const verticesPerLayer = (rows + 1) * (petalCount + 1);
+            let validVertexCount = vertices.length / 3;
+            
+            for (let layer = 0; layer < layerCount; layer++) {
+                const layerOffset = layer * verticesPerLayer;
+                
+                for (let r = 0; r < rows; r++) {
+                    for (let theta = 0; theta < petalCount; theta++) {
+                        const a = layerOffset + r * (petalCount + 1) + theta;
+                        const b = a + 1;
+                        const c = a + (petalCount + 1);
+                        const d = c + 1;
+                        
+                        if (a < validVertexCount && b < validVertexCount && 
+                            c < validVertexCount && d < validVertexCount) {
+                            indices.push(a, b, d);
+                            indices.push(a, d, c);
+                        }
+                    }
+                }
+            }
+            
+            if (vertices.length > 0) {
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                geometry.setIndex(indices);
+                geometry.computeVertexNormals();
+                
+                // Материал с цветным мерцанием
+                const material = new THREE.MeshPhongMaterial({
+                    vertexColors: true,
+                    side: THREE.DoubleSide,
+                    shininess: 60,
+                    emissive: new THREE.Color(0xf8618f).multiplyScalar(0.2), // Базовая эмиссия
+                    emissiveIntensity: 0.3, // Уменьшенная интенсивность мерцания
+                    transparent: true,
+                    opacity: 0.92,
+                    specular: 0x333333
+                });
+                
+                flowerMesh = new THREE.Mesh(geometry, material);
+                flowerMesh.rotation.x = -Math.PI / 2;
+                scene.add(flowerMesh);
+            }
+        }
+        
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            controls.update();
+            
+            // Мерцание цветами градиента с уменьшенной интенсивностью
+            flickerIntensity += flickerSpeed;
+            
+            // Уменьшенная интенсивность мерцания (в 2 раза меньше)
+            const flickerValue = 0.3 + 0.15 * Math.sin(flickerIntensity);
+            const opacityValue = 0.92 + 0.04 * Math.sin(flickerIntensity * 1.2);
+            
+            if (flowerMesh) {
+                // Получаем цвет мерцания из градиента
+                const flickerColor = getFlickerColor();
+                
+                // Применяем цветное мерцание
+                flowerMesh.material.emissive = flickerColor;
+                flowerMesh.material.emissiveIntensity = flickerValue;
+                flowerMesh.material.opacity = opacityValue;
+                
+                // Легкое пульсирование размера
+                const scalePulse = 1.0 + 0.02 * Math.sin(flickerIntensity * 0.8);
+                flowerMesh.scale.set(scalePulse, scalePulse, scalePulse);
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Запуск приложения
+        init();
+    </script>
+</body>
+</html>
